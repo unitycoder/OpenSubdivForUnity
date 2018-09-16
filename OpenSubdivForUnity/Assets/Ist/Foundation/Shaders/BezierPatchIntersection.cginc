@@ -133,7 +133,7 @@ inline bool BPITestBilinearPatch_(out real3 uvt, real3 p[4], real tmin, real tma
 
 	bool hit = false;
 	real3 uuvvtt = real3(0, 0, 0);
-	[unroll(3)]
+	[unroll(2)]
 	for (int i = 0; i < count; ++i) {
 		uuvvtt.y = root[i];
 		if (0 - uvMargin <= uuvvtt.y && uuvvtt.y <= 1 + uvMargin) {//TODO
