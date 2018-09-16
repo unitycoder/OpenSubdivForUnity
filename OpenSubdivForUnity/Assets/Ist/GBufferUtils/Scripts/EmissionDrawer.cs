@@ -53,7 +53,7 @@ namespace Ist
         {
             commands.Clear();
 
-            if (Camera.current.hdr)
+            if (Camera.current.allowHDR)
             {
                 commands.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
             }

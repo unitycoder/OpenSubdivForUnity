@@ -201,7 +201,7 @@ namespace Ist
 
             if (m_cameras.Length > 0)
             {
-                m_hdr = m_cameras[0].hdr;
+                m_hdr = m_cameras[0].allowHDR;
             }
 
             base.OnEnable();

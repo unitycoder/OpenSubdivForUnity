@@ -111,7 +111,7 @@ namespace Ist
                 m_rt_gbuffer[0] = CreateGBufferRT(RenderTextureFormat.ARGB32);
                 m_rt_gbuffer[1] = CreateGBufferRT(RenderTextureFormat.ARGB32);
                 m_rt_gbuffer[2] = CreateGBufferRT(m_enable_uav ? RenderTextureFormat.ARGBHalf : RenderTextureFormat.ARGB2101010);
-                m_rt_gbuffer[3] = CreateGBufferRT(m_camera.hdr ? RenderTextureFormat.ARGBHalf : RenderTextureFormat.ARGB32);
+                m_rt_gbuffer[3] = CreateGBufferRT(m_camera.allowHDR ? RenderTextureFormat.ARGBHalf : RenderTextureFormat.ARGB32);
                 for (int i = 0; i < m_rt_gbuffer.Length; ++i) { m_rb_gbuffer[i] = m_rt_gbuffer[i].colorBuffer; }
                 m_rt_depth = CreateGBufferRT(RenderTextureFormat.Depth, 24);
             }
