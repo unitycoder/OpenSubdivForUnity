@@ -10,7 +10,7 @@ Properties {
 	[KeywordEnum(SINGLE, DOUBLE)]
 	_PRECISION("Precision", Float) = 1
 	[KeywordEnum(BILINEAR, TRIANGLES)]
-	_INTERSECTION("Inersection Method", Float) = 0
+	_INTERSECTION("Intersection Method", Float) = 0
 }
 
 CGINCLUDE
