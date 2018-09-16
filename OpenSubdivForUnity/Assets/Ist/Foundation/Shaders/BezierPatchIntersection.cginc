@@ -4,16 +4,14 @@
 // thanks to @ototoi, @gishicho
 // http://jcgt.org/published/0004/01/04/
 
-
 // prototypes
 
-struct BezierPatchHit
-{
+struct BezierPatchHit {
     float t, u, v;
     int clip_level;
 };
 
-bool BPIRaycast(BezierPatch bp, Ray ray, float zmin, float zmax, float eps, out BezierPatchHit hit);
+bool BPIRaycast(BezierPatch bp, Ray ray, real zmin, real zmax, real eps, out BezierPatchHit hit);
 
 
 
@@ -21,14 +19,13 @@ bool BPIRaycast(BezierPatch bp, Ray ray, float zmin, float zmax, float eps, out 
 // implements
 
 #ifndef BPI_MAX_STACK_DEPTH
-    #define BPI_MAX_STACK_DEPTH 20
+    #define BPI_MAX_STACK_DEPTH 40
 #endif
 #ifndef BPI_MAX_LOOP
-    #define BPI_MAX_LOOP 1000
+    #define BPI_MAX_LOOP 2000
 #endif
 
-struct BPIWorkingBuffer
-{
+struct BPIWorkingBuffer {
     BezierPatch source; // input
     BezierPatch crop;
     BezierPatch rotate;
@@ -36,8 +33,7 @@ struct BPIWorkingBuffer
 };
 
 
-float3x3 BPIRotate2D_(float3 dx)
-{
+float3x3 BPIRotate2D_(float3 dx) {
     float2 x = normalize(dx.xy);
     float2 y = float2(-x[1], x[0]);
     return float3x3(
@@ -47,86 +43,206 @@ float3x3 BPIRotate2D_(float3 dx)
     );
 }
 
-bool BPITriangleIntersect_(
-    inout float tout, out float uout, out float vout,
-    float3 p0, float3 p1, float3 p2,
-    float3 ray_org, float3 ray_dir)
-{
-    float3 e1, e2;
-    float3 p, s, q;
+#if defined(_INTERSECTION_BILINEAR)
 
-    e1 = p1 - p0;
-    e2 = p2 - p0;
-    p = cross(ray_dir, e2);
-
-    float det = dot(e1, p);
-    float inv_det = 1.0 / det;
-
-    s = ray_org - p0;
-    q = cross(s, e1);
-
-    float u = dot(s, p) * inv_det;
-    float v = dot(q, ray_dir) * inv_det;
-    float t = dot(e2, q) * inv_det;
-
-    if (u < 0.0 || u > 1.0) return false;
-    if (v < 0.0 || u + v > 1.0) return false;
-    if (t < 0.0 || t > tout) return false;
-
-    tout = t;
-    uout = u;
-    vout = v;
-    return true;
+inline int BPISolve2_(out real2 root, real3 coeff) {
+	real A = coeff.x;
+	real B = coeff.y;
+	real C = coeff.z;
+	if (abs(A) <= 1e-6) {
+		if (abs(B) <= 1e-6) return 0;
+		real x = -C / B;
+		root = real2(x, 0);
+		return 1;
+	} else {
+		real D = B * B - 4 * A * C;
+		if (D < 0) {
+			return 0;
+		} else if (D == 0) {
+			real x = -0.5 * B / A;
+			root = real2(x, 0);
+			return 1;
+		} else {
+			real x1 = (abs(B) + sqrt(D)) / (2.0 * A);
+			if (B >= 0) {
+				x1 = -x1;
+			}
+			real x2 = C / (A * x1);
+			root = real2(min(x1, x2), max(x1, x2));
+			return 2;
+		}
+	}
 }
 
-bool BPITestBezierClipL_(
-    BezierPatch bp, out float3 uvt, float2 uv0, float2 uv1, float zmin, float zmax)
-{
-    // TODO (NO_DIRECT)
-    // DIRECT_BILINEAR
-    float3 p0, p1, p2, p3;
-    float3 ray_org = float3(0.0, 0.0, 0.0);
-    float3 ray_dir = float3(0.0, 0.0, 1.0);
+inline real BPIComputeU_(real A1, real A2, real B1, real B2, real C1, real C2, real D1, real D2, real v) {
+	//return div((v*(C1-C2)+(D1-D2)),(v*(A2-A1)+(B2-B1)));
+	real a = v * A2 + B2;
+	real b = v * (A2 - A1) + B2 - B1;
+	return (abs(b) >= abs(a))
+		? (v * (C1 - C2) + D1 - D2) / b
+		: (-v * C2 - D2) / a;
+}
+
+inline real BPIComputeT_(real a, real b, real c, real d, real iq, real2 uv) {
+	return ((uv.x * uv.y) * a + uv.x * b + uv.y * c + d) * iq;
+}
+
+inline bool BPISolveBilinearPatch_(out real3 uvt, real tmin, real tmax, real3 uuvvtt) {
+	real eps = 1e-5;
+	if (tmin - eps <= uuvvtt.z && uuvvtt.z <= tmax + eps) {
+		uvt = uuvvtt;
+		return true;
+	}
+	uvt = real3(0, 0, 0);
+	return false;
+}
+
+inline bool BPITestBilinearPatch_(out real3 uvt, real3 p[4], real tmin, real tmax, real uvMargin) {
+	uvt = real3(0, 0, 0);
+	const real3 p00 = p[0];
+	const real3 p10 = p[1];
+	const real3 p01 = p[2];
+	const real3 p11 = p[3];
+
+	static const int nPlane = 2;
+	real3 a = p11 - p10 - p01 + p00;
+	real3 b = p10 - p00;
+	real3 c = p01 - p00;
+	real3 d = p00;
+
+	//xz-zx
+	real A1 = a[0];
+	real B1 = b[0];
+	real C1 = c[0];
+	real D1 = d[0];
+
+	//yz-zy
+	real A2 = a[1];
+	real B2 = b[1];
+	real C2 = c[1];
+	real D2 = d[1];
+
+	real F1 = A2 * C1 - A1 * C2;
+	real F2 = A2 * D1 - A1 * D2 + B2 * C1 - B1 * C2;
+	real F3 = B2 * D1 - B1 * D2;
+
+	real2 root;
+	int count = BPISolve2_(root, real3(F1, F2, F3));
+
+	if (count <= 0) return false;
+
+	bool hit = false;
+	real3 uuvvtt = real3(0, 0, 0);
+	[unroll(3)]
+	for (int i = 0; i < count; ++i) {
+		uuvvtt.y = root[i];
+		if (0 - uvMargin <= uuvvtt.y && uuvvtt.y <= 1 + uvMargin) {//TODO
+			uuvvtt.y = saturate(uuvvtt.y);
+			uuvvtt.x = BPIComputeU_(A1, A2, B1, B2, C1, C2, D1, D2, uuvvtt.y);
+			if (0 - uvMargin <= uuvvtt.x && uuvvtt.x <= 1 + uvMargin) {//TODO
+				uuvvtt.x = saturate(uuvvtt.x);
+				uuvvtt.z = BPIComputeT_(a[nPlane], b[nPlane], c[nPlane], d[nPlane],
+					1.0, uuvvtt.xy);
+				if (BPISolveBilinearPatch_(uvt, tmin, tmax, uuvvtt)) {
+					tmax = uvt.z;
+					hit = true;
+				}
+			}
+		}
+	}
+	return hit;
+}
+
+inline bool BPITestBezierClipL_(
+	BezierPatch bp, out real3 uvt, real2 uv0, real2 uv1, real zmin, real zmax) {
+	real3 p[4];
+	real3 ray_org = real3(0.0, 0.0, 0.0);
+	real3 ray_dir = real3(0.0, 0.0, 1.0);
+	p[0] = bp.cp[0];
+	p[1] = bp.cp[3];
+	p[2] = bp.cp[12];
+	p[3] = bp.cp[15];
+	real m_uvMargin = 1e-1; // ???
+	if (BPITestBilinearPatch_(uvt, p, zmin, zmax, m_uvMargin)) {
+		uvt.xy = lerp(uv0, uv1, uvt.xy);
+		return true;
+	}
+	uvt = real3(0, 0, zmax);
+	return false;
+}
+
+#else
+
+inline bool BPITriangleIntersect_(
+	inout real tout, out real uout, out real vout,
+	real3 p0, real3 p1, real3 p2,
+	real3 ray_org, real3 ray_dir) {
+	real3 e1, e2;
+	real3 p, s, q;
+
+	e1 = p1 - p0;
+	e2 = p2 - p0;
+	p = cross(ray_dir, e2);
+
+	real det = dot(e1, p);
+	real inv_det = 1.0 / det;
+
+	s = ray_org - p0;
+	q = cross(s, e1);
+
+	real u = dot(s, p) * inv_det;
+	real v = dot(q, ray_dir) * inv_det;
+	real t = dot(e2, q) * inv_det;
+
+	real eps = 1e-2;
+	if (u < 0.0 - eps || u > 1.0 + eps) return false;
+	if (v < 0.0 - eps || u + v > 1.0 + eps) return false;
+	if (t < 0.0 - eps || t > tout + eps) return false;
+
+	tout = t;
+	uout = u;
+	vout = v;
+	return true;
+}
+
+inline bool BPITestBezierClipL_(
+    BezierPatch bp, out real3 uvt, real2 uv0, real2 uv1, real zmin, real zmax) {
+	real3 p0, p1, p2, p3;
+	real3 ray_org = real3(0.0, 0.0, 0.0);
+	real3 ray_dir = real3(0.0, 0.0, 1.0);
     p0 = bp.cp[0];
     p1 = bp.cp[3];
     p2 = bp.cp[12];
     p3 = bp.cp[15];
     bool ret = false;
-    float t = zmax, uu = 0.0, vv = 0.0;
+	real t = zmax, uu = 0.0, vv = 0.0;
     if (BPITriangleIntersect_(t, uu, vv, p0, p2, p1, ray_org, ray_dir)) {
-        float ww = 1.0 - (uu + vv);
-        float u = ww*0.0 + uu*0.0 + vv*1.0; //00 - 01 - 10
-        float v = ww*0.0 + uu*1.0 + vv*0.0; //00 - 01 - 10
-        uvt.x = lerp(uv0.x, uv1.x, u);
-        uvt.y = lerp(uv0.y, uv1.y, v);
-        uvt.z = t;
+		real ww = 1.0 - (uu + vv);
+		real u = ww*0.0 + uu*0.0 + vv*1.0; //00 - 01 - 10
+		real v = ww*0.0 + uu*1.0 + vv*0.0; //00 - 01 - 10
+		uvt.xy = lerp(uv0.xy, uv1.xy, real2(u, v));
+		uvt.z = t;
         ret = true;
     }
     if (BPITriangleIntersect_(t, uu, vv, p1, p2, p3, ray_org, ray_dir)) {
-        float ww = 1.0 - (uu + vv);
-        float u = ww*1.0 + uu*0.0 + vv*1.0; //10 - 01 - 11
-        float v = ww*0.0 + uu*1.0 + vv*1.0; //10 - 01 - 11
-        uvt.x = lerp(uv0.x, uv1.x, u);
-        uvt.y = lerp(uv0.y, uv1.y, v);
+		real ww = 1.0 - (uu + vv);
+		real u = ww*1.0 + uu*0.0 + vv*1.0; //10 - 01 - 11
+		real v = ww*0.0 + uu*1.0 + vv*1.0; //10 - 01 - 11
+        uvt.xy = lerp(uv0.xy, uv1.xy, real2(u, v));
         uvt.z = t;
         ret = true;
     }
     return ret;
 }
+#endif
 
-bool BPITestBounds_(inout BPIWorkingBuffer work, inout BezierPatchHit info, float zmin, float zmax, float eps)
-{
-    float3 bmin, bmax;
-    BPGetMinMax(work.source, bmin, bmax, eps*1e-3);
-
-    if (0.0 < bmin.x || bmax.x < 0.0 || 0.0 < bmin.y || bmax.y < 0.0 || bmax.z < zmin || zmax < bmin.z) {
-        return false;
-    }
-    return true;
+inline bool BPITestBounds_(inout BPIWorkingBuffer work, inout BezierPatchHit info, real zmin, real zmax, real eps) {
+	real3 bmin, bmax;
+    BPGetMinMax(work.source, bmin, bmax, eps * 1e-3);
+	return !(0.0 < bmin.x || bmax.x < 0.0 || 0.0 < bmin.y || bmax.y < 0.0 || bmax.z < zmin || zmax < bmin.z);
 }
 
-bool BPITestBezierPatch_(inout BPIWorkingBuffer work, inout BezierPatchHit info, float zmin, float zmax, float eps)
-{
+inline bool BPITestBezierPatch_(inout BPIWorkingBuffer work, inout BezierPatchHit info, real zmin, real zmax, real eps) {
     info = (BezierPatchHit)0;
 
     // non-recursive iteration
@@ -135,6 +251,7 @@ bool BPITestBezierPatch_(inout BPIWorkingBuffer work, inout BezierPatchHit info,
     range_stack[0] = work.uv_range;
 
     bool ret = false;
+	[loop]
     for (int i = 0; i < BPI_MAX_LOOP && stack_index >= 0; ++i) {
 
         // pop a patch range and crop
@@ -165,8 +282,8 @@ bool BPITestBezierPatch_(inout BPIWorkingBuffer work, inout BezierPatchHit info,
 
         // if it's small enough, test bilinear.
         if ((bmax.x - bmin.x) < eps || (bmax.y - bmin.y) < eps) {
-            float3 uvt;
-            if (BPITestBezierClipL_(work.crop, uvt, float2(u0, v0), float2(u1, v1), zmin, zmax)) {
+			real3 uvt;
+            if (BPITestBezierClipL_(work.crop, uvt, real2(u0, v0), real2(u1, v1), zmin, zmax)) {
                 info.u = uvt.x;
                 info.v = uvt.y;
                 info.t = uvt.z;
@@ -180,12 +297,11 @@ bool BPITestBezierPatch_(inout BPIWorkingBuffer work, inout BezierPatchHit info,
 
         // push children ranges
         if (clipU) {
-            float um = (u0 + u1)*0.5;
+            float um = (u0 + u1) * 0.5;
             range_stack[++stack_index] = float4(u0, um, v0, v1);
             range_stack[++stack_index] = float4(um, u1, v0, v1);
-        }
-        else {
-            float vm = (v0 + v1)*0.5;
+        } else {
+            float vm = (v0 + v1) * 0.5;
             range_stack[++stack_index] = float4(u0, u1, v0, vm);
             range_stack[++stack_index] = float4(u0, u1, vm, v1);
         }
@@ -195,9 +311,7 @@ bool BPITestBezierPatch_(inout BPIWorkingBuffer work, inout BezierPatchHit info,
     return ret;
 }
 
-
-bool BPIRaycast(BezierPatch bp, Ray ray, float zmin, float zmax, float eps, out BezierPatchHit hit)
-{
+inline bool BPIRaycast(BezierPatch bp, Ray ray, real zmin, real zmax, real eps, out BezierPatchHit hit) {
     BPIWorkingBuffer work = (BPIWorkingBuffer)0;
 
     work.source = bp;
@@ -211,10 +325,7 @@ bool BPIRaycast(BezierPatch bp, Ray ray, float zmin, float zmax, float eps, out 
     //}
 
     hit.t = zmax;
-    if (BPITestBezierPatch_(work, hit, zmin, zmax, eps)) {
-        return true;
-    }
-    return false;
+	return BPITestBezierPatch_(work, hit, zmin, zmax, eps);
 }
 
 #endif // BezierPatchIntersection_h

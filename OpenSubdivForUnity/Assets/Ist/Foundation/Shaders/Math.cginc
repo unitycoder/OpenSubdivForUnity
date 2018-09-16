@@ -1,6 +1,18 @@
 #ifndef IstMath_h
 #define IstMath_h
 
+#if defined(_PRECISION_DOUBLE)
+#define real double
+#define real2 double2
+#define real3 double3
+#define real4 double4
+#else
+#define real float
+#define real2 float2
+#define real3 float3
+#define real4 float4
+#endif
+
 #define PI 3.1415926535897932384626433832795
 #define INV_PI 0.3183098861837907
 

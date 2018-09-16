@@ -7,9 +7,17 @@ Properties {
     _Glossiness("Smoothness", Range(0,1)) = 0.5
     _Metallic("Metallic", Range(0, 1)) = 0.0
     _Epsilon("Epsilon", Float) = 0.01
+	[KeywordEnum(SINGLE, DOUBLE)]
+	_PRECISION("Precision", Float) = 1
+	[KeywordEnum(BILINEAR, TRIANGLES)]
+	_INTERSECTION("Inersection Method", Float) = 0
 }
 
 CGINCLUDE
+
+#pragma multi_compile _PRECISION_SINGLE _PRECISION_DOUBLE
+#pragma multi_compile _INTERSECTION_BILINEAR _PRECISION_TRIANGLES
+
 #include "UnityStandardCore.cginc"
 #include "Assets/Ist/Foundation/Shaders/Math.cginc"
 #include "Assets/Ist/Foundation/Shaders/Geometry.cginc"
